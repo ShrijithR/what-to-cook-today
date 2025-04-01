@@ -1,8 +1,17 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import SessionLocal, FoodItem, init_db
+from database import SessionLocal, FoodItem, init_db, User
+from auth import create_user, authenticate_user
+from contextlib import asynccontextmanager
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Initializing database...")
+    init_db()
+    yield
+    print("Cleanup tasks here if needed")
+
+app = FastAPI(lifespan=lifespan)
 
 # Dependency to get DB session
 def get_db():
@@ -11,6 +20,27 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# Singup endpoint
+@app.post("/signup/")
+def signup(username:str, password: str, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.username == username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already taken")
+    
+    user = create_user(username, password, db)
+    return {"message": "User created successfully", "user": user.username}
+
+# Login Endpoint
+@app.post("/logn/")
+def login(username: str, password: str, db: Session = Depends(get_db)):
+    user = authenticate_user(username, password, db)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    return {"message": "Login successfuly", "user": user.username}
+
 
 # Get all food items
 @app.get("/food/")
