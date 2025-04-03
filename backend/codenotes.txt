@@ -1,40 +1,39 @@
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
-from sqlalchemy.orm import Session
-from database import SessionLocal, init_db
+from fastapi import Depends
+from auth import get_current_user
+from database import User
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Initializing database...")
-    init_db()
-    yield
-    print("Cleanup tasks here if needed")
+# Create a new food item for the current user
+@app.post("/my_food/")
+def add_food(name: str, quantity: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    new_food = FoodItem(name=name, quantity=quantity, user_id=current_user.id)
+    db.add(new_food)
+    db.commit()
+    db.refresh(new_food)
+    return {"message": "Food added", "food": new_food}
 
-app = FastAPI(lifespan=lifespan)
+# Get all food items for the current user
+@app.get("/my_food/")
+def get_my_food(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    food_items = db.query(FoodItem).filter(FoodItem.user_id == current_user.id).all()
+    return food_items
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Update a food item (must belong to the current user)
+@app.put("/my_food/{food_id}")
+def update_food(food_id: int, quantity: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    food = db.query(FoodItem).filter(FoodItem.id == food_id, FoodItem.user_id == current_user.id).first()
+    if not food:
+        raise HTTPException(status_code=404, detail="Food not found")
+    food.quantity = quantity
+    db.commit()
+    db.refresh(food)
+    return {"message": "Food updated", "food": food}
 
-
-# Signup Endpoint
-@app.post("/signup/")
-def signup(username: str, password: str, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.username == username).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already taken")
-    
-    user = create_user(username, password, db)
-    return {"message": "User created successfully", "user": user.username}
-
-# Login Endpoint
-@app.post("/login/")
-def login(username: str, password: str, db: Session = Depends(get_db)):
-    user = authenticate_user(username, password, db)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    
-    return {"message": "Login successful", "user": user.username}
+# Delete a food item (must belong to the current user)
+@app.delete("/my_food/{food_id}")
+def delete_food(food_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    food = db.query(FoodItem).filter(FoodItem.id == food_id, FoodItem.user_id == current_user.id).first()
+    if not food:
+        raise HTTPException(status_code=404, detail="Food not found")
+    db.delete(food)
+    db.commit()
+    return {"message": f"Food with id {food_id} deleted"}
